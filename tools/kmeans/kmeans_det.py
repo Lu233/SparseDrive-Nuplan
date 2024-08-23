@@ -14,7 +14,7 @@ os.makedirs('vis/kmeans', exist_ok=True)
 K = 900
 DIS_THRESH = 55
 
-fp = 'data/infos/nuscenes_infos_train.pkl'
+fp = 'data/infos/mini/nuscenes_infos_train.pkl'
 data = mmcv.load(fp)
 data_infos = list(sorted(data["infos"], key=lambda e: e["timestamp"]))
 center = []
