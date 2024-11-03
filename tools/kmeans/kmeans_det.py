@@ -8,8 +8,8 @@ from sklearn.cluster import KMeans
 
 import mmcv
 
-os.makedirs('data/kmeans', exist_ok=True)
-os.makedirs('vis/kmeans', exist_ok=True)
+os.makedirs('data_test/kmeans', exist_ok=True)
+os.makedirs('vis_test/kmeans', exist_ok=True)
 
 K = 900
 DIS_THRESH = 55
