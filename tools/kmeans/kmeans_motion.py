@@ -94,8 +94,8 @@ for i in range(len(CLASSES)):
     clusters.append(cluster)
     for j in range(K):
         plt.scatter(cluster[j, :, 0], cluster[j, :,1])
-    plt.savefig(f'vis/kmeans/motion_intention_{CLASSES[i]}_{K}', bbox_inches='tight')
+    plt.savefig(f'vis_test/kmeans/motion_intention_{CLASSES[i]}_{K}', bbox_inches='tight')
     plt.close()
 
 clusters = np.stack(clusters, axis=0)
-np.save(f'data/kmeans/kmeans_motion_{K}.npy', clusters)
+np.save(f'data_test/kmeans/kmeans_motion_{K}.npy', clusters)
