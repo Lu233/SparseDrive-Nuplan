@@ -122,7 +122,7 @@ def get_neighbor_agents_future(scenario, agent_index):
 
     sampled_future_observations = [present_tracked_objects] + future_tracked_objects
     future_tracked_objects_tensor_list, _ = sampled_tracked_objects_to_tensor_list(sampled_future_observations)
-    agent_futures = agent_future_process(current_ego_state, future_tracked_objects_tensor_list, NUM_AGENTS, agent_index)
+    agent_futures = agent_future_process(current_ego_state, future_tracked_objects_tensor_list, len(agent_index), agent_index)
 
     return agent_futures
 
@@ -187,13 +187,19 @@ def create_nuplan_infos(out_path,
                                  '{}_infos_val.pkl'.format(info_prefix))
         mmcv.dump(data, info_val_path)
 
-
-def _plotstr(info, ego_stat, cameras):
+def plotstr(info, egoHalfLength, egoHalfWidth, egoHeading, cameras='', savefolder = 'savefig/', dataset = "nuplan"):
     fig, ax = plt.subplots(figsize=(8, 8))
-    for box, instanceId, name in zip(info["gt_boxes"], info["instance_inds"], info["gt_names"]):
-        x = box[0] - box[4] / 2   # 左下角的 x 坐标
-        y = box[1] - box[3] / 2  # 左下角的 y 坐标
-        rect = patches.Rectangle((x, y), box[4], box[3],
+    for box, instanceId, name, traj in zip(info["gt_boxes"], info["instance_inds"], info["gt_names"], info["gt_agent_fut_trajs"]):
+        if dataset == "nuplan":
+            width = box[4]
+            length = box[3]
+        else:
+            width = box[3]
+            length = box[4]
+        
+        x = box[0] - width / 2   # 左下角的 x 坐标
+        y = box[1] - length / 2  # 左下角的 y 坐标
+        rect = patches.Rectangle((x, y), width, length,
                                 linewidth=1, edgecolor="blue", facecolor="cyan", alpha=0.5)
         box_heading_degree = math.degrees(box[6])
         t = Affine2D().rotate_deg_around(box[0], box[1], box_heading_degree) + ax.transData
@@ -201,7 +207,7 @@ def _plotstr(info, ego_stat, cameras):
         ax.add_patch(rect)
         # 标注矩形中心
         ax.text(box[0], box[1], f"{instanceId}", ha="center", va="center")
-        if (name == "vehicle"):
+        if (name == "vehicle" or name == 'car' or name == 'truck' or name == 'bus'):
             # draw  driving direction arrow
             arrow_start = np.array([box[0], box[1]])  # Arrow starts at the center of the box
             direction = np.array([np.cos(np.radians(box_heading_degree)), np.sin(np.radians(box_heading_degree))])
@@ -213,15 +219,36 @@ def _plotstr(info, ego_stat, cameras):
                 arrow_end[0] - arrow_start[0], arrow_end[1] - arrow_start[1],
                 head_width=0.2, head_length=0.3, fc='black', ec='black'
             )
+            
+            # visualize agent trajectory
+            x_coords, y_coords = zip(*traj) # these are only increment
+            if dataset == "nuplan":
+                x_coords_remove_0 = [element for element in x_coords if element.item() != 0]
+                y_coords_remove_0 = [element for element in y_coords if element.item() != 0]
+                
+                coordinates = torch.stack((torch.tensor(x_coords_remove_0), torch.tensor(y_coords_remove_0)), dim=1)
+                cos_theta = torch.cos(torch.tensor(-egoHeading, dtype=torch.float32))
+                sin_theta = torch.sin(torch.tensor(-egoHeading, dtype=torch.float32))
+                
+                rotation_matrix = torch.tensor([[cos_theta, -sin_theta],[sin_theta,  cos_theta]])
+                rotated_coordinates = coordinates @ rotation_matrix
+                
+                x_coords_reconstruct = rotated_coordinates[:, 0]
+                y_coords_reconstruct = rotated_coordinates[:, 1]
+                
+            if dataset == "nuscenes":
+                x_coords_reconstruct = np.cumsum(x_coords) + box[0]
+                y_coords_reconstruct = np.cumsum(y_coords) + box[1]
+            ax.plot(x_coords_reconstruct, y_coords_reconstruct)
         
     # draw ego vehicle
-    x = 0 - ego_stat.agent.box.half_length
-    y = 0 - ego_stat.agent.box.half_width
+    x = 0 - egoHalfLength
+    y = 0 - egoHalfWidth
     
-    rect = patches.Rectangle((x, y), ego_stat.agent.box.half_length * 2, ego_stat.agent.box.half_width * 2,
+    rect = patches.Rectangle((x, y), egoHalfLength * 2, egoHalfWidth * 2,
                                 linewidth=1, edgecolor="red", facecolor="red", alpha=0.5)
     
-    ego_heading_degree = math.degrees(ego_stat.center.heading)
+    ego_heading_degree = math.degrees(egoHeading)
     t = Affine2D().rotate_deg_around(0, 0, ego_heading_degree) + ax.transData
     rect.set_transform(t)
     ax.add_patch(rect)
@@ -240,55 +267,101 @@ def _plotstr(info, ego_stat, cameras):
         head_width=0.2, head_length=0.3, fc='black', ec='black'
     )
     
+    # Draw ego trajectory
+    ego_traj = info["gt_ego_fut_trajs"]
+    x_coords, y_coords = zip(*ego_traj) # these are only increment in nuscenes
+    
+    if dataset == "nuplan":
+        coordinates = torch.stack((torch.tensor(x_coords), torch.tensor(y_coords)), dim=1)
+        cos_theta = torch.cos(torch.tensor(-egoHeading, dtype=torch.float32))
+        sin_theta = torch.sin(torch.tensor(-egoHeading, dtype=torch.float32))
+        
+        rotation_matrix = torch.tensor([[cos_theta, -sin_theta],[sin_theta,  cos_theta]])
+        rotated_coordinates = coordinates @ rotation_matrix
+        
+        x_coords_reconstruct = rotated_coordinates[:, 0]
+        y_coords_reconstruct = rotated_coordinates[:, 1]
+        
+    if dataset == "nuscenes":
+        x_coords_reconstruct = np.cumsum(x_coords)
+        y_coords_reconstruct = np.cumsum(y_coords)
+    
+    ax.plot(x_coords_reconstruct, y_coords_reconstruct)
+    
     # 设置坐标轴范围和网格
-    ax.set_xlim(-30, 30)
-    ax.set_ylim(-30, 30)
+    ax.set_xlim(-60, 60)
+    ax.set_ylim(-60, 60)
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True)
 
     # 显示图像
-    plt.title("Bird's View with Multiple Boxes")
+    plt.title("Bird's View")
     plt.xlabel("X-axis")
     plt.ylabel("Y-axis")
     
     # 保存为 .png 文件
-    output_filename = 'savefig/' + info["token"] + "_birdsview.png"
+    output_filename = savefolder + info["token"] + "_birdsview.png"
     plt.savefig(output_filename, dpi=300, bbox_inches="tight")  # dpi: 分辨率，bbox_inches: 修正边框
     plt.clf()  # Clears the current figure
     
-    img_CAM_F0 = cameras.images[CameraChannel.CAM_F0]
-    plt.imshow(img_CAM_F0.as_numpy, label = 'CAM_F0')
-    filename = 'savefig/' + info["token"] + '_CAM_F0.png'
-    plt.savefig(filename)
-    
-    img_CAM_B0 = cameras.images[CameraChannel.CAM_B0]
-    plt.imshow(img_CAM_B0.as_numpy, label = 'CAM_B0')
-    filename = 'savefig/' + info["token"] + '_CAM_B0.png'
-    plt.savefig(filename)
-    
-    img_CAM_L0= cameras.images[CameraChannel.CAM_L0]
-    plt.imshow(img_CAM_L0.as_numpy, label = 'CAM_L0')
-    filename = 'savefig/' + info["token"] + '_CAM_L0.png'
-    plt.savefig(filename)
-    
-    img_CAM_L2= cameras.images[CameraChannel.CAM_L2]
-    plt.imshow(img_CAM_L2.as_numpy, label = 'CAM_L2')
-    filename = 'savefig/' + info["token"] + '_CAM_L2.png'
-    plt.savefig(filename)
-    
-    img_CAM_R0= cameras.images[CameraChannel.CAM_R0]
-    plt.imshow(img_CAM_R0.as_numpy, label = 'CAM_R0')
-    filename = 'savefig/' + info["token"] + '_CAM_R0.png'
-    plt.savefig(filename)
-    
-    img_CAM_R2= cameras.images[CameraChannel.CAM_R2]
-    plt.imshow(img_CAM_R2.as_numpy, label = 'CAM_R2')
-    filename = 'savefig/' + info["token"] + '_CAM_R2.png'
-    plt.savefig(filename)
+    if dataset == "nuplan":
+        img_CAM_F0 = cameras.images[CameraChannel.CAM_F0]
+        plt.imshow(img_CAM_F0.as_numpy, label = 'CAM_F0')
+        filename = savefolder + info["token"] + '_CAM_F0.png'
+        plt.savefig(filename)
+        
+        img_CAM_B0 = cameras.images[CameraChannel.CAM_B0]
+        plt.imshow(img_CAM_B0.as_numpy, label = 'CAM_B0')
+        filename = savefolder + info["token"] + '_CAM_B0.png'
+        plt.savefig(filename)
+        
+        img_CAM_L0= cameras.images[CameraChannel.CAM_L0]
+        plt.imshow(img_CAM_L0.as_numpy, label = 'CAM_L0')
+        filename = savefolder + info["token"] + '_CAM_L0.png'
+        plt.savefig(filename)
+        
+        img_CAM_L2= cameras.images[CameraChannel.CAM_L2]
+        plt.imshow(img_CAM_L2.as_numpy, label = 'CAM_L2')
+        filename = savefolder + info["token"] + '_CAM_L2.png'
+        plt.savefig(filename)
+        
+        img_CAM_R0= cameras.images[CameraChannel.CAM_R0]
+        plt.imshow(img_CAM_R0.as_numpy, label = 'CAM_R0')
+        filename = savefolder + info["token"] + '_CAM_R0.png'
+        plt.savefig(filename)
+        
+        img_CAM_R2= cameras.images[CameraChannel.CAM_R2]
+        plt.imshow(img_CAM_R2.as_numpy, label = 'CAM_R2')
+        filename = savefolder + info["token"] + '_CAM_R2.png'
+        plt.savefig(filename)
+        
+    if dataset == "nuscenes":
+        print('CAM_F0: ' + info["cams"]['CAM_FRONT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_F0.png"
+        shutil.copy(info["cams"]['CAM_FRONT']['data_path'], destination_path)
+        
+        print('CAM_R0: ' + info["cams"]['CAM_FRONT_RIGHT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_R0.png"
+        shutil.copy(info["cams"]['CAM_FRONT_RIGHT']['data_path'], destination_path)
+        
+        print('CAM_R2: ' + info["cams"]['CAM_BACK_RIGHT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_R2.png"
+        shutil.copy(info["cams"]['CAM_BACK_RIGHT']['data_path'], destination_path)
+        
+        print('CAM_B0: ' + info["cams"]['CAM_BACK']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_B0.png"
+        shutil.copy(info["cams"]['CAM_BACK']['data_path'], destination_path)
+        
+        print('CAM_L0: ' + info["cams"]['CAM_FRONT_LEFT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_L0.png"
+        shutil.copy(info["cams"]['CAM_FRONT_LEFT']['data_path'], destination_path)
+        
+        print('CAM_L2: ' + info["cams"]['CAM_BACK_LEFT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_L2.png"
+        shutil.copy(info["cams"]['CAM_BACK_LEFT']['data_path'], destination_path)
     
     # 关闭图像以释放内存
     plt.close()
-        
 
 def _fill_trainval_infos(sces,
                          test=False,
@@ -345,14 +418,15 @@ def _fill_trainval_infos(sces,
             gt_boxes.append([tracked_object.box.center.x - ego_state.center.x, tracked_object.box.center.y - ego_state.center.y, 0, tracked_object.box.dimensions.width, tracked_object.box.dimensions.length, tracked_object.box.dimensions.height, tracked_object.box.center.heading])
             gt_names.append(tracked_object.tracked_object_type.fullname)
             gt_velocity.append([tracked_object.velocity.x, tracked_object.velocity.y])
-            instance_inds.append(tracked_object._metadata.track_id)
+            instance_inds.append(tracked_object.metadata.track_id)
             valid_flag.append(True)
             
         # get agent past tracks
         ego_agent_past, time_stamps_past = get_ego_agent(scenario)
         neighbor_agents_past, neighbor_agents_types = get_neighbor_agents(scenario)
-        ego_agent_past, neighbor_agents_past, neighbor_indices = agent_past_process(ego_agent_past, time_stamps_past, neighbor_agents_past, neighbor_agents_types, NUM_AGENTS)
-        agents_future = get_neighbor_agents_future(scenario, neighbor_indices)
+        #ego_agent_past, neighbor_agents_past, neighbor_indices = agent_past_process(ego_agent_past, time_stamps_past, neighbor_agents_past, neighbor_agents_types, NUM_AGENTS)
+        #agents_future = get_neighbor_agents_future(scenario, neighbor_indices)
+        agents_future = get_neighbor_agents_future(scenario, instance_inds)
         agents_future = agents_future[:, :, :2]
         ego_future = get_ego_agent_future(scenario)
         ego_future = ego_future[:, :2]
@@ -386,9 +460,8 @@ def _fill_trainval_infos(sces,
         
         sensors = scenario.get_sensors_at_iteration(0, [CameraChannel.CAM_F0, CameraChannel.CAM_B0, CameraChannel.CAM_L0, CameraChannel.CAM_L2, CameraChannel.CAM_R0, CameraChannel.CAM_R2])
         
-        _plotstr(info, ego_state, sensors)
-
-
+        plotstr(info, ego_state.agent.box.half_length, ego_state.agent.box.half_width, ego_state.center.heading, sensors)
+    
     return train_nuplan_infos
 
 

@@ -62,6 +62,39 @@ def _extract_agent_tensor(tracked_objects, track_token_ids, object_types):
 
     return output, track_token_ids, agent_types
 
+def _extract_agent_tensor_all(tracked_objects, track_token_ids, object_types):
+    """
+    Extracts the relevant data from the agents present in a past detection into a tensor.
+    Only objects of specified type will be transformed. Others will be ignored.
+    The output is a tensor as described in AgentInternalIndex
+    :param tracked_objects: The tracked objects to turn into a tensor.
+    :track_token_ids: A dictionary used to assign track tokens to integer IDs.
+    :object_type: TrackedObjectType to filter agents by.
+    :return: The generated tensor and the updated track_token_ids dict.
+    """
+    agents = tracked_objects.tracked_objects
+    agent_types = []
+    output = torch.zeros((len(agents), AgentInternalIndex.dim()), dtype=torch.float32)
+    max_agent_id = len(track_token_ids)
+
+    for idx, agent in enumerate(agents):
+        if agent.track_token not in track_token_ids:
+            track_token_ids[agent.track_token] = max_agent_id
+            max_agent_id += 1
+        track_token_int = track_token_ids[agent.track_token]
+
+        output[idx, AgentInternalIndex.track_token()] = float(track_token_int)
+        output[idx, AgentInternalIndex.vx()] = agent.velocity.x
+        output[idx, AgentInternalIndex.vy()] = agent.velocity.y
+        output[idx, AgentInternalIndex.heading()] = agent.center.heading
+        output[idx, AgentInternalIndex.width()] = agent.box.width
+        output[idx, AgentInternalIndex.length()] = agent.box.length
+        output[idx, AgentInternalIndex.x()] = agent.center.x
+        output[idx, AgentInternalIndex.y()] = agent.center.y
+        agent_types.append(agent.tracked_object_type)
+
+    return output, track_token_ids, agent_types
+
 
 def sampled_tracked_objects_to_tensor_list(past_tracked_objects):
     """
@@ -76,7 +109,7 @@ def sampled_tracked_objects_to_tensor_list(past_tracked_objects):
     track_token_ids = {}
 
     for i in range(len(past_tracked_objects)):
-        tensorized, track_token_ids, agent_types = _extract_agent_tensor(past_tracked_objects[i], track_token_ids, object_types)
+        tensorized, track_token_ids, agent_types = _extract_agent_tensor_all(past_tracked_objects[i], track_token_ids, object_types)
         output.append(tensorized)
         output_types.append(agent_types)
 
@@ -197,14 +230,85 @@ def agent_past_process(past_ego_states, past_time_stamps, past_tracked_objects, 
 
     return ego_tensor.numpy().astype(np.float32), agents, indices
 
+def agent_past_process_all(past_ego_states, past_time_stamps, past_tracked_objects, tracked_objects_types, num_agents):
+    """
+    This function process the data from the raw agent data.
+    :param past_ego_states: The input tensor data of the ego past.
+    :param past_time_stamps: The input tensor data of the past timestamps.
+    :param past_time_stamps: The input tensor data of other agents in the past.
+    :return: ego_agent_array, other_agents_array.
+    """
+    agents_states_dim = Agents.agents_states_dim()
+    ego_history = past_ego_states
+    time_stamps = past_time_stamps
+    agents = past_tracked_objects
+
+    anchor_ego_state = ego_history[-1, :].squeeze().clone()
+    ego_tensor = convert_absolute_quantities_to_relative(ego_history, anchor_ego_state)
+    agent_history = filter_agents_tensor(agents, reverse=True)
+    agent_types = tracked_objects_types[-1]
+
+    """
+    Model input feature representing the present and past states of the ego and agents, including:
+    ego: <np.ndarray: num_frames, 7>
+        The num_frames includes both present and past frames.
+        The last dimension is the ego pose (x, y, heading) velocities (vx, vy) acceleration (ax, ay) at time t.
+    agents: <np.ndarray: num_frames, num_agents, 8>
+        Agent features indexed by agent feature type.
+        The num_frames includes both present and past frames.
+        The num_agents is padded to fit the largest number of agents across all frames.
+        The last dimension is the agent pose (x, y, heading) velocities (vx, vy, yaw rate) and size (length, width) at time t.
+    """
+
+    if agent_history[-1].shape[0] == 0:
+        # Return zero tensor when there are no agents in the scene
+        agents_tensor = torch.zeros((len(agent_history), 0, agents_states_dim)).float()
+    else:
+        local_coords_agent_states = []
+        padded_agent_states = pad_agent_states(agent_history, reverse=True)
+
+        for agent_state in padded_agent_states:
+            local_coords_agent_states.append(convert_absolute_quantities_to_relative(agent_state, anchor_ego_state, 'agent'))
+    
+        # Calculate yaw rate
+        yaw_rate_horizon = compute_yaw_rate_from_state_tensors(padded_agent_states, time_stamps)
+    
+        agents_tensor = pack_agents_tensor(local_coords_agent_states, yaw_rate_horizon)
+
+    '''
+    Post-process the agents tensor to select a fixed number of agents closest to the ego vehicle.
+    agents: <np.ndarray: num_agents, num_frames, 11>]].
+        Agent type is one-hot encoded: [1, 0, 0] vehicle, [0, 1, 0] pedestrain, [0, 0, 1] bicycle 
+            and added to the feature of the agent
+        The num_agents is padded or trimmed to fit the predefined number of agents across.
+        The num_frames includes both present and past frames.
+    '''
+    agents = np.zeros(shape=(num_agents, agents_tensor.shape[0], agents_tensor.shape[-1]+3), dtype=np.float32)
+
+    # sort agents according to distance to ego
+    distance_to_ego = torch.norm(agents_tensor[-1, :, :2], dim=-1)
+    indices = list(torch.argsort(distance_to_ego).numpy())[:num_agents]
+
+    # fill agent features into the array
+    for i, j in enumerate(indices):
+        agents[i, :, :agents_tensor.shape[-1]] = agents_tensor[:, j, :agents_tensor.shape[-1]].numpy()
+        if agent_types[j] == TrackedObjectType.VEHICLE:
+            agents[i, :, agents_tensor.shape[-1]:] = [1, 0, 0]
+        elif agent_types[j] == TrackedObjectType.PEDESTRIAN:
+            agents[i, :, agents_tensor.shape[-1]:] = [0, 1, 0]
+        else:
+            agents[i, :, agents_tensor.shape[-1]:] = [0, 0, 1]
+
+    return ego_tensor.numpy().astype(np.float32), agents, indices
+
 
 def agent_future_process(anchor_ego_state, future_tracked_objects, num_agents, agent_index):
-    anchor_ego_state = torch.tensor([anchor_ego_state.rear_axle.x, anchor_ego_state.rear_axle.y, anchor_ego_state.rear_axle.heading, 
-                                     anchor_ego_state.dynamic_car_state.rear_axle_velocity_2d.x,
-                                     anchor_ego_state.dynamic_car_state.rear_axle_velocity_2d.y,
-                                     anchor_ego_state.dynamic_car_state.rear_axle_acceleration_2d.x,
-                                     anchor_ego_state.dynamic_car_state.rear_axle_acceleration_2d.y])
-    
+    anchor_ego_state = torch.tensor([anchor_ego_state.center.x, anchor_ego_state.center.y, anchor_ego_state.center.heading, 
+                                     anchor_ego_state.dynamic_car_state.center_velocity_2d.x,
+                                     anchor_ego_state.dynamic_car_state.center_velocity_2d.y,
+                                     anchor_ego_state.dynamic_car_state.center_acceleration_2d.x,
+                                     anchor_ego_state.dynamic_car_state.center_acceleration_2d.y])
+    future_tracked_objects_copy = future_tracked_objects[:]
     agent_future = filter_agents_tensor(future_tracked_objects)
     local_coords_agent_states = []
     for agent_state in agent_future:
@@ -212,11 +316,16 @@ def agent_future_process(anchor_ego_state, future_tracked_objects, num_agents, a
     padded_agent_states = pad_agent_states_with_zeros(local_coords_agent_states)
 
     # fill agent features into the array
-    agent_futures = np.zeros(shape=(num_agents, padded_agent_states.shape[0]-1, 3), dtype=np.float32)
-    for i, j in enumerate(agent_index):
-        agent_futures[i] = padded_agent_states[1:, j, [AgentInternalIndex.x(), AgentInternalIndex.y(), AgentInternalIndex.heading()]].numpy()
+    #agent_futures = np.zeros(shape=(num_agents, padded_agent_states.shape[0]-1, 3), dtype=np.float32)
+    #for i, j in enumerate(agent_index):
+    #    agent_futures[i] = padded_agent_states[1:, j, [AgentInternalIndex.x(), AgentInternalIndex.y(), AgentInternalIndex.heading()]].numpy()
 
-    return agent_futures
+    only_futures = padded_agent_states[1:,:, :]
+    agent_futures = only_futures.transpose(0, 1)
+    xyheading_indices = [AgentInternalIndex.x(), AgentInternalIndex.y(), AgentInternalIndex.heading()]
+    final_agent_futures = agent_futures[:, :, xyheading_indices]
+
+    return final_agent_futures
 
 
 def pad_agent_states_with_zeros(agent_trajectories):

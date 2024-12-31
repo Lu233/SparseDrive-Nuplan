@@ -10,6 +10,13 @@ import numpy as np
 from pyquaternion import Quaternion
 from shapely.geometry import MultiPoint, box
 
+### visualization
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.transforms import Affine2D
+import shutil
+### visualization end
+
 import mmcv
 
 from nuscenes.nuscenes import NuScenes
@@ -191,6 +198,153 @@ def get_available_scenes(nusc):
     print('exist scene num: {}'.format(len(available_scenes)))
     return available_scenes
 
+def plotstr(info, egoHalfLength, egoHalfWidth, egoHeading, cameras='', savefolder = 'savefig/', dataset = "nuplan"):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    for box, instanceId, name, traj in zip(info["gt_boxes"], info["instance_inds"], info["gt_names"], info["gt_agent_fut_trajs"]):
+        if dataset == "nuplan":
+            width = box[4]
+            length = box[3]
+        else:
+            width = box[3]
+            length = box[4]
+        
+        x = box[0] - width / 2   # 左下角的 x 坐标
+        y = box[1] - length / 2  # 左下角的 y 坐标
+        rect = patches.Rectangle((x, y), width, length,
+                                linewidth=1, edgecolor="blue", facecolor="cyan", alpha=0.5)
+        box_heading_degree = math.degrees(box[6])
+        t = Affine2D().rotate_deg_around(box[0], box[1], box_heading_degree) + ax.transData
+        rect.set_transform(t)
+        ax.add_patch(rect)
+        # 标注矩形中心
+        ax.text(box[0], box[1], f"{instanceId}", ha="center", va="center")
+        if (name == "vehicle" or name == 'car' or name == 'truck' or name == 'bus'):
+            # draw  driving direction arrow
+            arrow_start = np.array([box[0], box[1]])  # Arrow starts at the center of the box
+            direction = np.array([np.cos(np.radians(box_heading_degree)), np.sin(np.radians(box_heading_degree))])
+            arrow_end = arrow_start + direction * 3
+
+            # Draw the arrow
+            ax.arrow(
+                arrow_start[0], arrow_start[1],
+                arrow_end[0] - arrow_start[0], arrow_end[1] - arrow_start[1],
+                head_width=0.2, head_length=0.3, fc='black', ec='black'
+            )
+            
+            # visualize agent trajectory
+            x_coords, y_coords = zip(*traj) # these are only increment
+            x_coords_reconstruct = np.cumsum(x_coords) + box[0]
+            y_coords_reconstruct = np.cumsum(y_coords) + box[1]
+            ax.plot(x_coords_reconstruct, y_coords_reconstruct)
+        
+    # draw ego vehicle
+    x = 0 - egoHalfLength
+    y = 0 - egoHalfWidth
+    
+    rect = patches.Rectangle((x, y), egoHalfLength * 2, egoHalfWidth * 2,
+                                linewidth=1, edgecolor="red", facecolor="red", alpha=0.5)
+    
+    ego_heading_degree = math.degrees(egoHeading)
+    t = Affine2D().rotate_deg_around(0, 0, ego_heading_degree) + ax.transData
+    rect.set_transform(t)
+    ax.add_patch(rect)
+    # 标注矩形中心
+    ax.text(0, 0, "ego", ha="center", va="center")
+    
+    # draw ego driving direction arrow
+    arrow_start = np.array([0, 0])  # Arrow starts at the center of the box
+    direction = np.array([np.cos(np.radians(ego_heading_degree)), np.sin(np.radians(ego_heading_degree))])
+    arrow_end = arrow_start + direction * 3
+
+    # Draw the arrow
+    ax.arrow(
+        arrow_start[0], arrow_start[1],
+        arrow_end[0] - arrow_start[0], arrow_end[1] - arrow_start[1],
+        head_width=0.2, head_length=0.3, fc='black', ec='black'
+    )
+    
+    # Draw ego trajectory
+    ego_traj = info["gt_ego_fut_trajs"]
+    x_coords, y_coords = zip(*ego_traj) # these are only increment
+    x_coords_reconstruct = np.cumsum(x_coords)
+    y_coords_reconstruct = np.cumsum(y_coords)
+    ax.plot(x_coords_reconstruct, y_coords_reconstruct)
+    
+    # 设置坐标轴范围和网格
+    ax.set_xlim(-60, 60)
+    ax.set_ylim(-60, 60)
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True)
+
+    # 显示图像
+    plt.title("Bird's View")
+    plt.xlabel("X-axis")
+    plt.ylabel("Y-axis")
+    
+    # 保存为 .png 文件
+    output_filename = savefolder + info["token"] + "_birdsview.png"
+    plt.savefig(output_filename, dpi=300, bbox_inches="tight")  # dpi: 分辨率，bbox_inches: 修正边框
+    plt.clf()  # Clears the current figure
+    
+    if dataset == "nuplan":
+        img_CAM_F0 = cameras.images[CameraChannel.CAM_F0]
+        plt.imshow(img_CAM_F0.as_numpy, label = 'CAM_F0')
+        filename = savefolder + info["token"] + '_CAM_F0.png'
+        plt.savefig(filename)
+        
+        img_CAM_B0 = cameras.images[CameraChannel.CAM_B0]
+        plt.imshow(img_CAM_B0.as_numpy, label = 'CAM_B0')
+        filename = savefolder + info["token"] + '_CAM_B0.png'
+        plt.savefig(filename)
+        
+        img_CAM_L0= cameras.images[CameraChannel.CAM_L0]
+        plt.imshow(img_CAM_L0.as_numpy, label = 'CAM_L0')
+        filename = savefolder + info["token"] + '_CAM_L0.png'
+        plt.savefig(filename)
+        
+        img_CAM_L2= cameras.images[CameraChannel.CAM_L2]
+        plt.imshow(img_CAM_L2.as_numpy, label = 'CAM_L2')
+        filename = savefolder + info["token"] + '_CAM_L2.png'
+        plt.savefig(filename)
+        
+        img_CAM_R0= cameras.images[CameraChannel.CAM_R0]
+        plt.imshow(img_CAM_R0.as_numpy, label = 'CAM_R0')
+        filename = savefolder + info["token"] + '_CAM_R0.png'
+        plt.savefig(filename)
+        
+        img_CAM_R2= cameras.images[CameraChannel.CAM_R2]
+        plt.imshow(img_CAM_R2.as_numpy, label = 'CAM_R2')
+        filename = savefolder + info["token"] + '_CAM_R2.png'
+        plt.savefig(filename)
+        
+    if dataset == "nuscenes":
+        print('CAM_F0: ' + info["cams"]['CAM_FRONT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_F0.png"
+        shutil.copy(info["cams"]['CAM_FRONT']['data_path'], destination_path)
+        
+        print('CAM_R0: ' + info["cams"]['CAM_FRONT_RIGHT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_R0.png"
+        shutil.copy(info["cams"]['CAM_FRONT_RIGHT']['data_path'], destination_path)
+        
+        print('CAM_R2: ' + info["cams"]['CAM_BACK_RIGHT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_R2.png"
+        shutil.copy(info["cams"]['CAM_BACK_RIGHT']['data_path'], destination_path)
+        
+        print('CAM_B0: ' + info["cams"]['CAM_BACK']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_B0.png"
+        shutil.copy(info["cams"]['CAM_BACK']['data_path'], destination_path)
+        
+        print('CAM_L0: ' + info["cams"]['CAM_FRONT_LEFT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_L0.png"
+        shutil.copy(info["cams"]['CAM_FRONT_LEFT']['data_path'], destination_path)
+        
+        print('CAM_L2: ' + info["cams"]['CAM_BACK_LEFT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_L2.png"
+        shutil.copy(info["cams"]['CAM_BACK_LEFT']['data_path'], destination_path)
+    
+    # 关闭图像以释放内存
+    plt.close()
+
 def _fill_trainval_infos(nusc,
                          nusc_map_extractor,
                          nusc_can_bus,
@@ -242,7 +396,7 @@ def _fill_trainval_infos(nusc,
             'ego2global_translation': pose_record['translation'],
             'ego2global_rotation': pose_record['rotation'],
             'timestamp': sample['timestamp'],
-            'map_location': map_location,
+            'map_location': map_location,  
         }
 
         l2e_r = info['lidar2ego_rotation']
@@ -270,6 +424,8 @@ def _fill_trainval_infos(nusc,
         map_geoms = nusc_map_extractor.get_map_geom(map_location, translation, rotation)
         map_annos = geom2anno(map_geoms)
         info['map_annos'] = map_annos
+        
+        # ego_heading_angle = Quaternion(e2g_r).yaw_pitch_roll[0]
 
         # obtain 6 image's information per frame
         camera_types = [
@@ -331,7 +487,8 @@ def _fill_trainval_infos(nusc,
             # we need to convert box size to
             # the format of our lidar coordinate system
             # which is x_size, y_size, z_size (corresponding to l, w, h)
-            gt_boxes = np.concatenate([locs, dims[:, [1, 0, 2]], rots], axis=1)
+            dims_processed = dims[:, [1, 0, 2]]
+            gt_boxes = np.concatenate([locs, dims_processed, rots], axis=1)
             assert len(gt_boxes) == len(
                 annotations), f'{len(gt_boxes)}, {len(annotations)}'
             
@@ -413,6 +570,8 @@ def _fill_trainval_infos(nusc,
             train_nusc_infos.append(info)
         else:
             val_nusc_infos.append(info)
+            
+        plotstr(info, 2.5, 1.0, math.pi/2.0, savefolder="savefig_nuscenes/", dataset="nuscenes")
 
     return train_nusc_infos, val_nusc_infos
 
