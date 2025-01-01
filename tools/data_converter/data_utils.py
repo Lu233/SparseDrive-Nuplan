@@ -27,7 +27,12 @@ from nuplan.common.actor_state.state_representation import Point2D, StateSE2
 from nuplan.common.geometry.torch_geometry import vector_set_coordinates_to_local_frame
 from nuplan.planning.training.preprocessing.feature_builders.vector_builder_utils import *
 from nuplan.planning.training.preprocessing.utils.vector_preprocessing import interpolate_points
+from nuplan.planning.scenario_builder.nuplan_db.nuplan_scenario import CameraChannel
 
+import matplotlib.patches as patches
+from matplotlib.transforms import Affine2D
+import math
+import shutil
 
 def _extract_agent_tensor(tracked_objects, track_token_ids, object_types):
     """
@@ -303,25 +308,20 @@ def agent_past_process_all(past_ego_states, past_time_stamps, past_tracked_objec
 
 
 def agent_future_process(anchor_ego_state, future_tracked_objects, num_agents, agent_index):
-    anchor_ego_state = torch.tensor([anchor_ego_state.center.x, anchor_ego_state.center.y, anchor_ego_state.center.heading, 
+    anchor_ego_state = torch.tensor([anchor_ego_state.center.x, anchor_ego_state.center.y, 
+                                     # anchor_ego_state.center.heading, 
+                                     anchor_ego_state.center.heading - math.pi / 2.0,
                                      anchor_ego_state.dynamic_car_state.center_velocity_2d.x,
                                      anchor_ego_state.dynamic_car_state.center_velocity_2d.y,
                                      anchor_ego_state.dynamic_car_state.center_acceleration_2d.x,
                                      anchor_ego_state.dynamic_car_state.center_acceleration_2d.y])
-    future_tracked_objects_copy = future_tracked_objects[:]
     agent_future = filter_agents_tensor(future_tracked_objects)
     local_coords_agent_states = []
     for agent_state in agent_future:
         local_coords_agent_states.append(convert_absolute_quantities_to_relative(agent_state, anchor_ego_state, 'agent'))
     padded_agent_states = pad_agent_states_with_zeros(local_coords_agent_states)
 
-    # fill agent features into the array
-    #agent_futures = np.zeros(shape=(num_agents, padded_agent_states.shape[0]-1, 3), dtype=np.float32)
-    #for i, j in enumerate(agent_index):
-    #    agent_futures[i] = padded_agent_states[1:, j, [AgentInternalIndex.x(), AgentInternalIndex.y(), AgentInternalIndex.heading()]].numpy()
-
-    only_futures = padded_agent_states[1:,:, :]
-    agent_futures = only_futures.transpose(0, 1)
+    agent_futures = padded_agent_states.transpose(0, 1)
     xyheading_indices = [AgentInternalIndex.x(), AgentInternalIndex.y(), AgentInternalIndex.heading()]
     final_agent_futures = agent_futures[:, :, xyheading_indices]
 
@@ -654,3 +654,159 @@ def draw_trajectory(ego_trajectory, agent_trajectories):
         if agent_trajectories[i, -1, 0] != 0:
             trajectory = agent_trajectories[i]
             plt.plot(trajectory[:, 0], trajectory[:, 1], 'm', linewidth=3, zorder=3)
+
+def plotBirdsview(info, egoHalfLength, egoHalfWidth, cameras='', savefolder = 'savefig/', dataset = "nuplan"):
+    egoHeading = math.pi/2.0
+    fig, ax = plt.subplots(figsize=(8, 8))
+    for box, instanceId, name, traj in zip(info["gt_boxes"], info["instance_inds"], info["gt_names"], info["gt_agent_fut_trajs"]):
+        width = box[3]
+        length = box[4]
+        
+        x = box[0] - width / 2   # 左下角的 x 坐标
+        y = box[1] - length / 2  # 左下角的 y 坐标
+        rect = patches.Rectangle((x, y), width, length,
+                                linewidth=1, edgecolor="blue", facecolor="cyan", alpha=0.5)
+        box_heading_degree = math.degrees(box[6])
+        t = Affine2D().rotate_deg_around(box[0], box[1], box_heading_degree) + ax.transData
+        rect.set_transform(t)
+        ax.add_patch(rect)
+        # 标注矩形中心
+        ax.text(box[0], box[1], f"{instanceId}", ha="center", va="center")
+        if (name == "vehicle" or name == 'car' or name == 'truck' or name == 'bus'):
+            # draw  driving direction arrow
+            arrow_start = np.array([box[0], box[1]])  # Arrow starts at the center of the box
+            direction = np.array([np.cos(np.radians(box_heading_degree)), np.sin(np.radians(box_heading_degree))])
+            arrow_end = arrow_start + direction * 3
+
+            # Draw the arrow
+            ax.arrow(
+                arrow_start[0], arrow_start[1],
+                arrow_end[0] - arrow_start[0], arrow_end[1] - arrow_start[1],
+                head_width=0.2, head_length=0.3, fc='black', ec='black'
+            )
+            
+            # visualize agent trajectory
+            x_coords, y_coords = zip(*traj) # traj values are only increments, not absolute values
+            x_coords_reconstruct = np.cumsum(x_coords) + box[0]
+            y_coords_reconstruct = np.cumsum(y_coords) + box[1]
+            ax.plot(x_coords_reconstruct, y_coords_reconstruct)
+        
+    # draw ego vehicle
+    x = 0 - egoHalfLength
+    y = 0 - egoHalfWidth
+    
+    rect = patches.Rectangle((x, y), egoHalfLength * 2, egoHalfWidth * 2,
+                                linewidth=1, edgecolor="red", facecolor="red", alpha=0.5)
+    
+    ego_heading_degree = math.degrees(egoHeading)
+    t = Affine2D().rotate_deg_around(0, 0, ego_heading_degree) + ax.transData
+    rect.set_transform(t)
+    ax.add_patch(rect)
+    # 标注矩形中心
+    ax.text(0, 0, "ego", ha="center", va="center")
+    
+    # draw ego driving direction arrow
+    arrow_start = np.array([0, 0])  # Arrow starts at the center of the box
+    direction = np.array([np.cos(np.radians(ego_heading_degree)), np.sin(np.radians(ego_heading_degree))])
+    arrow_end = arrow_start + direction * 3
+
+    # Draw the arrow
+    ax.arrow(
+        arrow_start[0], arrow_start[1],
+        arrow_end[0] - arrow_start[0], arrow_end[1] - arrow_start[1],
+        head_width=0.2, head_length=0.3, fc='black', ec='black'
+    )
+    
+    # Draw ego trajectory
+    ego_traj = info["gt_ego_fut_trajs"]
+    x_coords, y_coords = zip(*ego_traj) # these are only increment in nuscenes
+    
+    x_coords_reconstruct = np.cumsum(x_coords)
+    y_coords_reconstruct = np.cumsum(y_coords)
+    
+    ax.plot(x_coords_reconstruct, y_coords_reconstruct)
+    
+    # text driving direction
+    command = info['gt_ego_fut_cmd']
+    if command[0] > 0.1:
+        text_drivingDir = "Turn Right"
+    if command[1] > 0.1:
+        text_drivingDir = "Turn Left"
+    if command[2] > 0.1:
+        text_drivingDir = "Go Straight"
+    ax.text(0, -50, text_drivingDir, ha="center", va="center")
+    
+    # 设置坐标轴范围和网格
+    ax.set_xlim(-60, 60)
+    ax.set_ylim(-60, 60)
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True)
+
+    # 显示图像
+    plt.title("Bird's View")
+    plt.xlabel("X-axis")
+    plt.ylabel("Y-axis")
+    
+    # 保存为 .png 文件
+    output_filename = savefolder + info["token"] + "_birdsview.png"
+    plt.savefig(output_filename, dpi=300, bbox_inches="tight")  # dpi: 分辨率，bbox_inches: 修正边框
+    plt.clf()  # Clears the current figure
+    
+    if dataset == "nuplan":
+        img_CAM_F0 = cameras.images[CameraChannel.CAM_F0]
+        plt.imshow(img_CAM_F0.as_numpy, label = 'CAM_F0')
+        filename = savefolder + info["token"] + '_CAM_F0.png'
+        plt.savefig(filename)
+        
+        img_CAM_B0 = cameras.images[CameraChannel.CAM_B0]
+        plt.imshow(img_CAM_B0.as_numpy, label = 'CAM_B0')
+        filename = savefolder + info["token"] + '_CAM_B0.png'
+        plt.savefig(filename)
+        
+        img_CAM_L0= cameras.images[CameraChannel.CAM_L0]
+        plt.imshow(img_CAM_L0.as_numpy, label = 'CAM_L0')
+        filename = savefolder + info["token"] + '_CAM_L0.png'
+        plt.savefig(filename)
+        
+        img_CAM_L2= cameras.images[CameraChannel.CAM_L2]
+        plt.imshow(img_CAM_L2.as_numpy, label = 'CAM_L2')
+        filename = savefolder + info["token"] + '_CAM_L2.png'
+        plt.savefig(filename)
+        
+        img_CAM_R0= cameras.images[CameraChannel.CAM_R0]
+        plt.imshow(img_CAM_R0.as_numpy, label = 'CAM_R0')
+        filename = savefolder + info["token"] + '_CAM_R0.png'
+        plt.savefig(filename)
+        
+        img_CAM_R2= cameras.images[CameraChannel.CAM_R2]
+        plt.imshow(img_CAM_R2.as_numpy, label = 'CAM_R2')
+        filename = savefolder + info["token"] + '_CAM_R2.png'
+        plt.savefig(filename)
+        
+    if dataset == "nuscenes":
+        print('CAM_F0: ' + info["cams"]['CAM_FRONT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_F0.png"
+        shutil.copy(info["cams"]['CAM_FRONT']['data_path'], destination_path)
+        
+        print('CAM_R0: ' + info["cams"]['CAM_FRONT_RIGHT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_R0.png"
+        shutil.copy(info["cams"]['CAM_FRONT_RIGHT']['data_path'], destination_path)
+        
+        print('CAM_R2: ' + info["cams"]['CAM_BACK_RIGHT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_R2.png"
+        shutil.copy(info["cams"]['CAM_BACK_RIGHT']['data_path'], destination_path)
+        
+        print('CAM_B0: ' + info["cams"]['CAM_BACK']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_B0.png"
+        shutil.copy(info["cams"]['CAM_BACK']['data_path'], destination_path)
+        
+        print('CAM_L0: ' + info["cams"]['CAM_FRONT_LEFT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_L0.png"
+        shutil.copy(info["cams"]['CAM_FRONT_LEFT']['data_path'], destination_path)
+        
+        print('CAM_L2: ' + info["cams"]['CAM_BACK_LEFT']['data_path'])
+        destination_path = savefolder + info["token"] + "_CAM_L2.png"
+        shutil.copy(info["cams"]['CAM_BACK_LEFT']['data_path'], destination_path)
+    
+    # 关闭图像以释放内存
+    plt.close()
