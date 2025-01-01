@@ -3,10 +3,6 @@ import argparse
 import math
 from os import path as osp
 
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.transforms import Affine2D
-
 import numpy as np
 
 import mmcv
@@ -14,7 +10,6 @@ import mmcv
 from common_utils import get_scenario_map, get_filter_parameters
 from data_utils import *
 from tqdm import tqdm
-from nuplan.common.actor_state.vehicle_parameters import get_pacifica_parameters
 
 from nuplan.planning.utils.multithreading.worker_parallel import SingleMachineParallelExecutor
 from nuplan.planning.scenario_builder.scenario_filter import ScenarioFilter
@@ -105,8 +100,39 @@ def get_ego_agent_future(scenario):
     trajectory_relative_poses = convert_absolute_to_relative_poses(
         current_absolute_state.rear_axle, [state.rear_axle for state in trajectory_absolute_states]
     )
+    
+    ego_future = trajectory_relative_poses[:, :2]
+    
+    # set mask
+    ego_future_mask = np.ones(ego_future.shape[0])
+    
+    # Rotate the trajectories (ego is always with direction angle pi/2 from x axis in birdsview)
+    x_coords, y_coords = zip(*ego_future)
+    
+    coordinates = torch.stack((torch.tensor(x_coords), torch.tensor(y_coords)), dim=1)
+    cos_theta = torch.cos(torch.tensor(-math.pi/2.0, dtype=torch.float32))
+    sin_theta = torch.sin(torch.tensor(-math.pi/2.0, dtype=torch.float32))
+    
+    rotation_matrix = torch.tensor([[cos_theta, -sin_theta],[sin_theta,  cos_theta]])
+    rotated_coordinates = coordinates @ rotation_matrix
+    
+    x_coords_reconstruct = rotated_coordinates[:, 0].tolist()
+    y_coords_reconstruct = rotated_coordinates[:, 1].tolist()
+    
+    # Combine along the last dimension
+    recombined = np.concatenate([np.expand_dims(x_coords_reconstruct, axis=-1), np.expand_dims(y_coords_reconstruct, axis=-1)], axis=-1)
 
-    return trajectory_relative_poses
+    if recombined[-1][0] >= 2:
+        command = np.array([1, 0, 0])  # Turn Right
+    elif recombined[-1][0] <= -2:
+        command = np.array([0, 1, 0])  # Turn Left
+    else:
+        command = np.array([0, 0, 1])  # Go Straight
+
+    # convert to increments
+    recombined[1:] = recombined[1:] - recombined[:-1]
+
+    return recombined, command.astype(np.float32), ego_future_mask.astype(np.float32)
 
 def get_neighbor_agents_future(scenario, agent_index):
     current_ego_state = scenario.initial_ego_state
@@ -124,7 +150,19 @@ def get_neighbor_agents_future(scenario, agent_index):
     future_tracked_objects_tensor_list, _ = sampled_tracked_objects_to_tensor_list(sampled_future_observations)
     agent_futures = agent_future_process(current_ego_state, future_tracked_objects_tensor_list, len(agent_index), agent_index)
 
-    return agent_futures
+    # process agent future masks
+    final_agent_future = np.zeros((agent_futures.shape[0], agent_futures.shape[1] - 1, 2))
+    agents_masks = np.zeros((agent_futures.shape[0], agent_futures.shape[1] -1))
+    for i, agent_future in enumerate(agent_futures):
+        valid_steps = np.where((agent_future[:, 0] == 0) & (agent_future[:, 1] == 0))[0]
+        if valid_steps.size > 0 and valid_steps[0] > 1:
+            agents_masks[i, :valid_steps[0]-1] = 1
+            final_agent_future[i, 0:valid_steps[0]-1] = agent_future[1:valid_steps[0], :2]  - agent_future[0:valid_steps[0]-1, :2]
+        elif valid_steps.size == 0:
+            agents_masks[i, :] = 1
+            final_agent_future[i, :] = agent_future[1:, :2]  - agent_future[:-1, :2]
+        
+    return final_agent_future, agents_masks.astype(np.float32)
 
 def create_nuplan_infos(out_path,
                           info_prefix,
@@ -187,182 +225,6 @@ def create_nuplan_infos(out_path,
                                  '{}_infos_val.pkl'.format(info_prefix))
         mmcv.dump(data, info_val_path)
 
-def plotstr(info, egoHalfLength, egoHalfWidth, egoHeading, cameras='', savefolder = 'savefig/', dataset = "nuplan"):
-    fig, ax = plt.subplots(figsize=(8, 8))
-    for box, instanceId, name, traj in zip(info["gt_boxes"], info["instance_inds"], info["gt_names"], info["gt_agent_fut_trajs"]):
-        if dataset == "nuplan":
-            width = box[4]
-            length = box[3]
-        else:
-            width = box[3]
-            length = box[4]
-        
-        x = box[0] - width / 2   # 左下角的 x 坐标
-        y = box[1] - length / 2  # 左下角的 y 坐标
-        rect = patches.Rectangle((x, y), width, length,
-                                linewidth=1, edgecolor="blue", facecolor="cyan", alpha=0.5)
-        box_heading_degree = math.degrees(box[6])
-        t = Affine2D().rotate_deg_around(box[0], box[1], box_heading_degree) + ax.transData
-        rect.set_transform(t)
-        ax.add_patch(rect)
-        # 标注矩形中心
-        ax.text(box[0], box[1], f"{instanceId}", ha="center", va="center")
-        if (name == "vehicle" or name == 'car' or name == 'truck' or name == 'bus'):
-            # draw  driving direction arrow
-            arrow_start = np.array([box[0], box[1]])  # Arrow starts at the center of the box
-            direction = np.array([np.cos(np.radians(box_heading_degree)), np.sin(np.radians(box_heading_degree))])
-            arrow_end = arrow_start + direction * 3
-
-            # Draw the arrow
-            ax.arrow(
-                arrow_start[0], arrow_start[1],
-                arrow_end[0] - arrow_start[0], arrow_end[1] - arrow_start[1],
-                head_width=0.2, head_length=0.3, fc='black', ec='black'
-            )
-            
-            # visualize agent trajectory
-            x_coords, y_coords = zip(*traj) # these are only increment
-            if dataset == "nuplan":
-                x_coords_remove_0 = [element for element in x_coords if element.item() != 0]
-                y_coords_remove_0 = [element for element in y_coords if element.item() != 0]
-                
-                coordinates = torch.stack((torch.tensor(x_coords_remove_0), torch.tensor(y_coords_remove_0)), dim=1)
-                cos_theta = torch.cos(torch.tensor(-egoHeading, dtype=torch.float32))
-                sin_theta = torch.sin(torch.tensor(-egoHeading, dtype=torch.float32))
-                
-                rotation_matrix = torch.tensor([[cos_theta, -sin_theta],[sin_theta,  cos_theta]])
-                rotated_coordinates = coordinates @ rotation_matrix
-                
-                x_coords_reconstruct = rotated_coordinates[:, 0]
-                y_coords_reconstruct = rotated_coordinates[:, 1]
-                
-            if dataset == "nuscenes":
-                x_coords_reconstruct = np.cumsum(x_coords) + box[0]
-                y_coords_reconstruct = np.cumsum(y_coords) + box[1]
-            ax.plot(x_coords_reconstruct, y_coords_reconstruct)
-        
-    # draw ego vehicle
-    x = 0 - egoHalfLength
-    y = 0 - egoHalfWidth
-    
-    rect = patches.Rectangle((x, y), egoHalfLength * 2, egoHalfWidth * 2,
-                                linewidth=1, edgecolor="red", facecolor="red", alpha=0.5)
-    
-    ego_heading_degree = math.degrees(egoHeading)
-    t = Affine2D().rotate_deg_around(0, 0, ego_heading_degree) + ax.transData
-    rect.set_transform(t)
-    ax.add_patch(rect)
-    # 标注矩形中心
-    ax.text(0, 0, "ego", ha="center", va="center")
-    
-    # draw ego driving direction arrow
-    arrow_start = np.array([0, 0])  # Arrow starts at the center of the box
-    direction = np.array([np.cos(np.radians(ego_heading_degree)), np.sin(np.radians(ego_heading_degree))])
-    arrow_end = arrow_start + direction * 3
-
-    # Draw the arrow
-    ax.arrow(
-        arrow_start[0], arrow_start[1],
-        arrow_end[0] - arrow_start[0], arrow_end[1] - arrow_start[1],
-        head_width=0.2, head_length=0.3, fc='black', ec='black'
-    )
-    
-    # Draw ego trajectory
-    ego_traj = info["gt_ego_fut_trajs"]
-    x_coords, y_coords = zip(*ego_traj) # these are only increment in nuscenes
-    
-    if dataset == "nuplan":
-        coordinates = torch.stack((torch.tensor(x_coords), torch.tensor(y_coords)), dim=1)
-        cos_theta = torch.cos(torch.tensor(-egoHeading, dtype=torch.float32))
-        sin_theta = torch.sin(torch.tensor(-egoHeading, dtype=torch.float32))
-        
-        rotation_matrix = torch.tensor([[cos_theta, -sin_theta],[sin_theta,  cos_theta]])
-        rotated_coordinates = coordinates @ rotation_matrix
-        
-        x_coords_reconstruct = rotated_coordinates[:, 0]
-        y_coords_reconstruct = rotated_coordinates[:, 1]
-        
-    if dataset == "nuscenes":
-        x_coords_reconstruct = np.cumsum(x_coords)
-        y_coords_reconstruct = np.cumsum(y_coords)
-    
-    ax.plot(x_coords_reconstruct, y_coords_reconstruct)
-    
-    # 设置坐标轴范围和网格
-    ax.set_xlim(-60, 60)
-    ax.set_ylim(-60, 60)
-    ax.set_aspect("equal", adjustable="box")
-    ax.grid(True)
-
-    # 显示图像
-    plt.title("Bird's View")
-    plt.xlabel("X-axis")
-    plt.ylabel("Y-axis")
-    
-    # 保存为 .png 文件
-    output_filename = savefolder + info["token"] + "_birdsview.png"
-    plt.savefig(output_filename, dpi=300, bbox_inches="tight")  # dpi: 分辨率，bbox_inches: 修正边框
-    plt.clf()  # Clears the current figure
-    
-    if dataset == "nuplan":
-        img_CAM_F0 = cameras.images[CameraChannel.CAM_F0]
-        plt.imshow(img_CAM_F0.as_numpy, label = 'CAM_F0')
-        filename = savefolder + info["token"] + '_CAM_F0.png'
-        plt.savefig(filename)
-        
-        img_CAM_B0 = cameras.images[CameraChannel.CAM_B0]
-        plt.imshow(img_CAM_B0.as_numpy, label = 'CAM_B0')
-        filename = savefolder + info["token"] + '_CAM_B0.png'
-        plt.savefig(filename)
-        
-        img_CAM_L0= cameras.images[CameraChannel.CAM_L0]
-        plt.imshow(img_CAM_L0.as_numpy, label = 'CAM_L0')
-        filename = savefolder + info["token"] + '_CAM_L0.png'
-        plt.savefig(filename)
-        
-        img_CAM_L2= cameras.images[CameraChannel.CAM_L2]
-        plt.imshow(img_CAM_L2.as_numpy, label = 'CAM_L2')
-        filename = savefolder + info["token"] + '_CAM_L2.png'
-        plt.savefig(filename)
-        
-        img_CAM_R0= cameras.images[CameraChannel.CAM_R0]
-        plt.imshow(img_CAM_R0.as_numpy, label = 'CAM_R0')
-        filename = savefolder + info["token"] + '_CAM_R0.png'
-        plt.savefig(filename)
-        
-        img_CAM_R2= cameras.images[CameraChannel.CAM_R2]
-        plt.imshow(img_CAM_R2.as_numpy, label = 'CAM_R2')
-        filename = savefolder + info["token"] + '_CAM_R2.png'
-        plt.savefig(filename)
-        
-    if dataset == "nuscenes":
-        print('CAM_F0: ' + info["cams"]['CAM_FRONT']['data_path'])
-        destination_path = savefolder + info["token"] + "_CAM_F0.png"
-        shutil.copy(info["cams"]['CAM_FRONT']['data_path'], destination_path)
-        
-        print('CAM_R0: ' + info["cams"]['CAM_FRONT_RIGHT']['data_path'])
-        destination_path = savefolder + info["token"] + "_CAM_R0.png"
-        shutil.copy(info["cams"]['CAM_FRONT_RIGHT']['data_path'], destination_path)
-        
-        print('CAM_R2: ' + info["cams"]['CAM_BACK_RIGHT']['data_path'])
-        destination_path = savefolder + info["token"] + "_CAM_R2.png"
-        shutil.copy(info["cams"]['CAM_BACK_RIGHT']['data_path'], destination_path)
-        
-        print('CAM_B0: ' + info["cams"]['CAM_BACK']['data_path'])
-        destination_path = savefolder + info["token"] + "_CAM_B0.png"
-        shutil.copy(info["cams"]['CAM_BACK']['data_path'], destination_path)
-        
-        print('CAM_L0: ' + info["cams"]['CAM_FRONT_LEFT']['data_path'])
-        destination_path = savefolder + info["token"] + "_CAM_L0.png"
-        shutil.copy(info["cams"]['CAM_FRONT_LEFT']['data_path'], destination_path)
-        
-        print('CAM_L2: ' + info["cams"]['CAM_BACK_LEFT']['data_path'])
-        destination_path = savefolder + info["token"] + "_CAM_L2.png"
-        shutil.copy(info["cams"]['CAM_BACK_LEFT']['data_path'], destination_path)
-    
-    # 关闭图像以释放内存
-    plt.close()
-
 def _fill_trainval_infos(sces,
                          test=False,
                          max_sweeps=10,
@@ -407,6 +269,7 @@ def _fill_trainval_infos(sces,
         valid_flag = []
         instance_inds = []
         gt_agent_fut_trajs = []
+        gt_agent_fut_masks = []
         
         ego_state = scenario.get_ego_state_at_iteration(0)
         ego_status.extend([ego_state.dynamic_car_state.rear_axle_acceleration_2d.x, ego_state.dynamic_car_state.rear_axle_acceleration_2d.y, 0.0]) # acceleration in ego vehicle frame, m/s/s
@@ -415,9 +278,26 @@ def _fill_trainval_infos(sces,
         ego_status.append(ego_state.tire_steering_angle) # steering angle, positive: left turn, negative: right turn
         
         for tracked_object in tracked_objects.tracked_objects:
-            gt_boxes.append([tracked_object.box.center.x - ego_state.center.x, tracked_object.box.center.y - ego_state.center.y, 0, tracked_object.box.dimensions.width, tracked_object.box.dimensions.length, tracked_object.box.dimensions.height, tracked_object.box.center.heading])
+            ### process gt_boxes (rotate the coordinate to keep same as in nuscenes_converter)
+            x_ori = tracked_object.box.center.x - ego_state.center.x
+            y_ori = tracked_object.box.center.y - ego_state.center.y
+            heading_angle = math.pi / 2.0 - ego_state.center.heading # the heading angle definition in nuplan and nuscenes is different (based on x axis and y axis)
+            
+            x_new = x_ori * math.cos(heading_angle) - y_ori * math.sin(heading_angle)
+            y_new = x_ori * math.sin(heading_angle) + y_ori * math.cos(heading_angle)
+            # Add the rotation angle to the heading
+            heading_new = tracked_object.box.center.heading + heading_angle
+            gt_boxes.append([x_new, y_new, 0, tracked_object.box.dimensions.length, tracked_object.box.dimensions.width, tracked_object.box.dimensions.height, heading_new])
+            
+            ### process gt_velocity (rotate the coordinate to keep same as in nuscenes_converter)
+            vx_ori = tracked_object.velocity.x
+            yx_ori = tracked_object.velocity.y
+            vx_new = vx_ori * math.cos(heading_angle) - yx_ori * math.sin(heading_angle)
+            vy_new = vx_ori * math.sin(heading_angle) + yx_ori * math.cos(heading_angle)
+            gt_velocity.append([vx_new, vy_new])
+            
+            ### 
             gt_names.append(tracked_object.tracked_object_type.fullname)
-            gt_velocity.append([tracked_object.velocity.x, tracked_object.velocity.y])
             instance_inds.append(tracked_object.metadata.track_id)
             valid_flag.append(True)
             
@@ -426,20 +306,9 @@ def _fill_trainval_infos(sces,
         neighbor_agents_past, neighbor_agents_types = get_neighbor_agents(scenario)
         #ego_agent_past, neighbor_agents_past, neighbor_indices = agent_past_process(ego_agent_past, time_stamps_past, neighbor_agents_past, neighbor_agents_types, NUM_AGENTS)
         #agents_future = get_neighbor_agents_future(scenario, neighbor_indices)
-        agents_future = get_neighbor_agents_future(scenario, instance_inds)
-        agents_future = agents_future[:, :, :2]
-        ego_future = get_ego_agent_future(scenario)
-        ego_future = ego_future[:, :2]
-        
-        # drive command according to final fut step offset
-        if ego_future[-1][1] >= 2:
-            command = np.array([1, 0, 0])  # Turn Right
-        elif ego_future[-1][1] <= -2:
-            command = np.array([0, 1, 0])  # Turn Left
-        else:
-            command = np.array([0, 0, 1])  # Go Straight
-            
-        gt_ego_fut_cmd = command.astype(np.float32)
+        agents_future, gt_agent_fut_masks = get_neighbor_agents_future(scenario, instance_inds)
+
+        ego_future, gt_ego_fut_cmd, ego_fut_masks = get_ego_agent_future(scenario)
         
         info['gt_boxes'] = np.array(gt_boxes)
         info['gt_names'] = np.array(gt_names)
@@ -449,21 +318,19 @@ def _fill_trainval_infos(sces,
         info['valid_flag'] = np.array(valid_flag)
         info['instance_inds'] = np.array(instance_inds)
         info['gt_agent_fut_trajs'] = agents_future
-        #info['gt_agent_fut_masks'] = gt_fut_masks.astype(np.float32)
+        info['gt_agent_fut_masks'] = gt_agent_fut_masks
         info['gt_ego_fut_trajs'] = ego_future
-        #info['gt_ego_fut_masks'] = ego_fut_masks[1:].astype(np.float32)
+        info['gt_ego_fut_masks'] = ego_fut_masks
         info['gt_ego_fut_cmd'] = gt_ego_fut_cmd
         info['ego_status'] = np.array(ego_status).astype(np.float32)
-
-        
-        train_nuplan_infos.append(info)
         
         sensors = scenario.get_sensors_at_iteration(0, [CameraChannel.CAM_F0, CameraChannel.CAM_B0, CameraChannel.CAM_L0, CameraChannel.CAM_L2, CameraChannel.CAM_R0, CameraChannel.CAM_R2])
         
-        plotstr(info, ego_state.agent.box.half_length, ego_state.agent.box.half_width, ego_state.center.heading, sensors)
+        plotBirdsview(info, ego_state.agent.box.half_length, ego_state.agent.box.half_width, sensors)
+        
+        train_nuplan_infos.append(info)
     
     return train_nuplan_infos
-
 
 def nuplan_data_prep(info_prefix,
                        version,
