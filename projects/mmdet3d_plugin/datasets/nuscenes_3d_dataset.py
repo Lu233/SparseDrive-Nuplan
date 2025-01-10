@@ -25,6 +25,7 @@ from .utils import (
     draw_lidar_bbox3d_on_bev,
 )
 
+DATASET = "nuplan"
 
 @DATASETS.register_module()
 class NuScenes3DDataset(Dataset):
@@ -322,8 +323,9 @@ class NuScenes3DDataset(Dataset):
         ego2global[:3, 3] = np.array(info["ego2global_translation"])
         input_dict["lidar2global"] = ego2global @ lidar2ego
 
-        map_geoms = self.anno2geom(info["map_annos"])
-        input_dict["map_geoms"] = map_geoms
+        if DATASET != "nuplan":
+            map_geoms = self.anno2geom(info["map_annos"])
+            input_dict["map_geoms"] = map_geoms
 
         if self.modality["use_camera"]:
             image_paths = []
@@ -400,6 +402,9 @@ class NuScenes3DDataset(Dataset):
             anns_results['gt_ego_fut_trajs'] = info['gt_ego_fut_trajs']
             anns_results['gt_ego_fut_masks'] = info['gt_ego_fut_masks']
             anns_results['gt_ego_fut_cmd'] = info['gt_ego_fut_cmd']
+            
+            if DATASET == "nuplan":
+                return anns_results
         
             ## get future box for planning eval
             fut_ts = int(info['gt_ego_fut_masks'].sum())
