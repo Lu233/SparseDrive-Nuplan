@@ -726,15 +726,31 @@ def plotBirdsview(info, egoHalfLength, egoHalfWidth, cameras='', savefolder = 's
     
     ax.plot(x_coords_reconstruct, y_coords_reconstruct)
     
-    # text driving direction
+    # driving direction
     command = info['gt_ego_fut_cmd']
     if command[0] > 0.1:
-        text_drivingDir = "Turn Right"
+        text_drivingDir = "Turn Right\n"
     if command[1] > 0.1:
-        text_drivingDir = "Turn Left"
+        text_drivingDir = "Turn Left\n"
     if command[2] > 0.1:
-        text_drivingDir = "Go Straight"
-    ax.text(0, -50, text_drivingDir, ha="center", va="center")
+        text_drivingDir = "Go Straight\n"
+    
+    # text egoStatus
+    ego_accl_x = info['ego_status'][0]
+    ego_accl_y = info['ego_status'][1]
+    ego_accl_z = info['ego_status'][2]
+    ego_rotate_x = info['ego_status'][3]
+    ego_rotate_y = info['ego_status'][4]
+    ego_rotate_z = info['ego_status'][5]
+    ego_vel_x = info['ego_status'][6]
+    ego_vel_y = info['ego_status'][7]
+    ego_vel_z = info['ego_status'][8]
+    ego_steer = info['ego_status'][9]
+    text_egostatus = text_drivingDir + f"ego accleration x: {ego_accl_x:.3f} \n" + f"ego accleration y: {ego_accl_y:.3f} \n" + \
+        f"ego accleration z: {ego_accl_z:.3f} \n" + f"ego rotation x: {ego_rotate_x:.3f} \n" + f"ego rotation y: {ego_rotate_y:.3f} \n" + \
+        f"ego rotation z: {ego_rotate_z:.3f} \n" + f"ego vel x: {ego_vel_x:.3f} \n" + f"ego vel y: {ego_vel_y:.3f} \n" + \
+        f"ego vel z: {ego_vel_z:.3f} \n" + f"ego steer: {ego_steer:.3f}"
+    ax.text(50, -50, text_egostatus, ha="center", va="center")
     
     # 设置坐标轴范围和网格
     ax.set_xlim(-60, 60)

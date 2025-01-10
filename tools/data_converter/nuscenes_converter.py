@@ -442,10 +442,14 @@ def get_ego_status(nusc, nusc_can_bus, sample):
         pose_data = pose_msgs[pose_index]
         steer_index = locate_message(steer_uts, ref_utime)
         steer_data = steer_msgs[steer_index]
-        ego_status.extend(pose_data["accel"]) # acceleration in ego vehicle frame, m/s/s
-        ego_status.extend(pose_data["rotation_rate"]) # angular velocity in ego vehicle frame, rad/s
-        ego_status.extend(pose_data["vel"]) # velocity in ego vehicle frame, m/s
-        ego_status.append(steer_data["value"]) # steering angle, positive: left turn, negative: right turn
+        accel = pose_data["accel"]
+        rotation_rate = pose_data["rotation_rate"] 
+        vel = pose_data["vel"]
+        steer = steer_data["value"]
+        ego_status.extend(accel) # acceleration in ego vehicle frame, m/s/s
+        ego_status.extend(rotation_rate) # angular velocity in ego vehicle frame, rad/s
+        ego_status.extend(vel) # velocity in ego vehicle frame, m/s
+        ego_status.append(steer) # steering angle, positive: left turn, negative: right turn
     except:
         ego_status = [0] * 10
     
