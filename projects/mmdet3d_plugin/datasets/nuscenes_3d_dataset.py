@@ -25,7 +25,8 @@ from .utils import (
     draw_lidar_bbox3d_on_bev,
 )
 
-DATASET = "nuplan"
+#DATASET = "nuplan"
+DATASET = "nuscenes"
 
 @DATASETS.register_module()
 class NuScenes3DDataset(Dataset):
@@ -323,7 +324,7 @@ class NuScenes3DDataset(Dataset):
         ego2global[:3, 3] = np.array(info["ego2global_translation"])
         input_dict["lidar2global"] = ego2global @ lidar2ego
 
-        if DATASET != "nuplan":
+        if DATASET != "nuplan": #map data is not available in nuplan as similiar format in nuscenes
             map_geoms = self.anno2geom(info["map_annos"])
             input_dict["map_geoms"] = map_geoms
 
