@@ -633,7 +633,7 @@ data_basic_config = dict(
 )
 eval_config = dict(
     **data_basic_config,
-    ann_file=anno_root + 'nuscenes_infos_val.pkl',
+    ann_file=anno_root + 'nuscenes_infos_val_remote.pkl',
     pipeline=eval_pipeline,
     test_mode=True,
 )
@@ -663,7 +663,7 @@ data = dict(
     ),
     val=dict(
         **data_basic_config,
-        ann_file=anno_root + "nuscenes_infos_val.pkl",
+        ann_file=anno_root + "nuscenes_infos_val_remote.pkl",
         pipeline=test_pipeline,
         data_aug_conf=data_aug_conf,
         test_mode=True,
@@ -671,7 +671,7 @@ data = dict(
     ),
     test=dict(
         **data_basic_config,
-        ann_file=anno_root + "nuscenes_infos_val.pkl",
+        ann_file=anno_root + "nuscenes_infos_val_remote.pkl",
         pipeline=test_pipeline,
         data_aug_conf=data_aug_conf,
         test_mode=True,
