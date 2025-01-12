@@ -175,27 +175,3 @@
         }
     ],
 } 
-
-{
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Launch Visualize Script",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/tools/visualization/visualize.py",
-            "args": [
-                "${workspaceFolder}/projects/configs/sparsedrive_small_stage2.py",
-                "--result-path",
-                "${workspaceFolder}/work_dirs/sparsedrive_small_stage2/results_mini.pkl",
-            ],
-            "console": "integratedTerminal",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "justMyCode": false,
-            "pythonArgs": [
-            ]
-        }
-    ]
-}
