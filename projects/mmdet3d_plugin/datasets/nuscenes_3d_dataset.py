@@ -25,8 +25,8 @@ from .utils import (
     draw_lidar_bbox3d_on_bev,
 )
 
-#DATASET = "nuplan"
-DATASET = "nuscenes"
+DATASET = "nuplan"
+#DATASET = "nuscenes"
 
 @DATASETS.register_module()
 class NuScenes3DDataset(Dataset):
