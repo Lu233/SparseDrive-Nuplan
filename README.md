@@ -12,20 +12,23 @@ This is a fork of the official [SparseDrive](https://github.com/swc-17/SparseDri
 - So far only tested with the nuplan mini dataset
 
 ## Intermediate result
-# inference nuplan mini dataset
+### inference nuplan mini dataset
 model: use the one released by SparseDrive: [ckpt](https://github.com/swc-17/SparseDrive/releases/download/v1.0/sparsedrive_stage2.pth) 
-![](https://github.com/Lu233/SparseDrive-Nuplan/tree/develop_remote/docs/intermediate_result.gif)
+![Nuplan dataset inference](docs/intermediate_result.gif)
 
-# Birdsview plot comparsion between nuscenes and nuplan after data conversion
+### Birdsview plot comparsion between nuscenes and nuplan after data conversion
 nuscenes example
-![](https://github.com/Lu233/SparseDrive-Nuplan/tree/develop_remote/docs/nuscenes_birdsview_example.png)
+![nuscenes example](docs/nuscenes_birdsview_example.png)
 
 nuplan example
-![](https://github.com/Lu233/SparseDrive-Nuplan/tree/develop_remote/docs/nuplan_birdsview_example.png)
+![nuplan example](docs/nuplan_birdsview_example.png)
 
-## Conclusion and next steps
+## Conclusion and 
+The inference has showed that the detection and prediction has generally worked however its performance is still poor. This could be related to: 
+- the actual camera mounting position and intrinsic in nuplan vehicles are not fully same as in nuscenes vehicles. these datas are unfortunately not given in nuplan dataset. Therefore the datas from nuscenes are used instead. 
 
-
+## next step
+- fine-tuning of the already released [ckpt](https://github.com/swc-17/SparseDrive/releases/download/v1.0/sparsedrive_stage2.pth) with nuplan dataset may improve the performance.
 
 ## Quick Start
 The quick start is slightly different compare to the orignal [Quick Start](docs/quick_start.md). But it is compatible with all the original SparseDrive functions.
@@ -104,7 +107,5 @@ Open project with VSCode. Launch Nuplan Visualize Script from launch.json file (
 or
 
 ```
-sh tools/visualize_nuplan.sh #if you are on a machine without flashattention compatibility
-
-sh tools/visualize_nuplan_remote.sh #if you are on a machine with flashattention compatibility
+sh tools/visualize_nuplan.sh
 ```
