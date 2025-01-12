@@ -85,12 +85,12 @@ mkdir ckpt
 wget https://download.pytorch.org/models/resnet50-19c8e357.pth -O ckpt/resnet50-19c8e357.pth
 ```
 
-### Commence training and testing
+## Commence training and testing
 
-# train
+### train
 to be added
 
-# test
+### test
 Open project with VSCode. Launch Nuplan Test Script from launch.json file (make sure you have adapted the pathes in launch.json accordingly)
 
 or
