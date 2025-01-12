@@ -9,15 +9,16 @@ dist_params = dict(backend="nccl")
 log_level = "INFO"
 work_dir = None
 
-total_batch_size = 64
-num_gpus = 8
+total_batch_size = 4
+num_gpus = 1
 batch_size = total_batch_size // num_gpus
 num_iters_per_epoch = int(length[version] // (num_gpus * batch_size))
-num_epochs = 100
-checkpoint_epoch_interval = 20
+num_epochs = 10
+checkpoint_epoch_interval = 1
 
 checkpoint_config = dict(
-    interval=num_iters_per_epoch * checkpoint_epoch_interval
+#    interval=num_iters_per_epoch * checkpoint_epoch_interval
+    interval=1
 )
 log_config = dict(
     interval=51,
@@ -30,7 +31,7 @@ load_from = None
 resume_from = None
 workflow = [("train", 1)]
 fp16 = dict(loss_scale=32.0)
-input_shape = (704, 256)
+input_shape = (704, 256) # Lu: why 704, 256?
 
 
 # ================== model ========================
@@ -99,7 +100,7 @@ model = dict(
         with_cp=True,
         out_indices=(0, 1, 2, 3),
         norm_cfg=dict(type="BN", requires_grad=True),
-        pretrained="ckpt/resnet50-19c8e357.pth",
+        pretrained=None,
     ),
     img_neck=dict(
         type="FPN",
@@ -142,7 +143,8 @@ model = dict(
                 in_loops=1,
                 out_loops=4 if decouple_attn else 2,
             ),
-            num_single_frame_decoder=num_single_frame_decoder,
+            # num_single_frame_decoder=num_single_frame_decoder,
+            num_single_frame_decoder=1,
             operation_order=(
                 [
                     "gnn",
@@ -162,10 +164,11 @@ model = dict(
                     "norm",
                     "refine",
                 ]
-                * (num_decoder - num_single_frame_decoder)
+                #* (num_decoder - num_single_frame_decoder)
+                * (6 - 1)
             )[2:],
             temp_graph_model=dict(
-                type="MultiheadFlashAttention",
+                type="MultiheadAttention",
                 embed_dims=embed_dims if not decouple_attn else embed_dims * 2,
                 num_heads=num_groups,
                 batch_first=True,
@@ -174,9 +177,11 @@ model = dict(
             if temporal
             else None,
             graph_model=dict(
-                type="MultiheadFlashAttention",
-                embed_dims=embed_dims if not decouple_attn else embed_dims * 2,
-                num_heads=num_groups,
+                type="MultiheadAttention",
+                #embed_dims=embed_dims if not decouple_attn else embed_dims * 2,
+                embed_dims=512,
+                #num_heads=num_groups,
+                num_heads=8,
                 batch_first=True,
                 dropout=drop_out,
             ),
@@ -306,7 +311,7 @@ model = dict(
                 * (num_decoder - num_single_frame_decoder_map)
             )[:],
             temp_graph_model=dict(
-                type="MultiheadFlashAttention",
+                type="MultiheadAttention",
                 embed_dims=embed_dims if not decouple_attn_map else embed_dims * 2,
                 num_heads=num_groups,
                 batch_first=True,
@@ -315,7 +320,7 @@ model = dict(
             if temporal_map
             else None,
             graph_model=dict(
-                type="MultiheadFlashAttention",
+                type="MultiheadAttention",
                 embed_dims=embed_dims if not decouple_attn_map else embed_dims * 2,
                 num_heads=num_groups,
                 batch_first=True,
@@ -435,14 +440,14 @@ model = dict(
                 dropout=drop_out,
             ),
             graph_model=dict(
-                type="MultiheadFlashAttention",
+                type="MultiheadAttention",
                 embed_dims=embed_dims if not decouple_attn_motion else embed_dims * 2,
                 num_heads=num_groups,
                 batch_first=True,
                 dropout=drop_out,
             ),
             cross_graph_model=dict(
-                type="MultiheadFlashAttention",
+                type="MultiheadAttention",
                 embed_dims=embed_dims,
                 num_heads=num_groups,
                 batch_first=True,
@@ -650,6 +655,7 @@ data_aug_conf = {
 
 data = dict(
     samples_per_gpu=batch_size,
+    #workers_per_gpu=1,
     workers_per_gpu=batch_size,
     train=dict(
         **data_basic_config,

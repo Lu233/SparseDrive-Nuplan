@@ -11,6 +11,10 @@ dist_test/
 vis/
 val/
 lib/
+savefig/
+savefig_nuscenes/
+vis_nuplan/
+vis_test/
 
 *.egg-info
 build/
