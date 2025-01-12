@@ -11,6 +11,9 @@ CMD_LIST = ['Turn Right', 'Turn Left', 'Go Straight']
 COLOR_VECTORS = ['cornflowerblue', 'royalblue', 'slategrey']
 SCORE_THRESH = 0.3
 MAP_SCORE_THRESH = 0.3
+
+NUPLAN = True
+
 color_mapping = np.asarray([
     [0, 0, 0],
     [255, 179, 0],
@@ -117,7 +120,8 @@ class BEVRender:
         self.reset_canvas()
         self.draw_detection_gt(data)
         self.draw_motion_gt(data)
-        self.draw_map_gt(data)
+        if (not NUPLAN):
+            self.draw_map_gt(data)
         self.draw_planning_gt(data)
         self._render_sdc_car()
         self._render_command(data)

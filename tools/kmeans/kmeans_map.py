@@ -30,5 +30,5 @@ for i in range(K):
     x = vecs[i, :, 0]
     y = vecs[i, :, 1]
     plt.plot(x, y, linewidth=1, marker='o', linestyle='-', markersize=2)
-plt.savefig(f'vis/kmeans/map_anchor_{K}', bbox_inches='tight')
-np.save(f'data/kmeans/kmeans_map_{K}.npy', vecs)
+plt.savefig(f'vis_test/kmeans/map_anchor_{K}', bbox_inches='tight')
+np.save(f'data_test/kmeans/kmeans_map_{K}.npy', vecs)

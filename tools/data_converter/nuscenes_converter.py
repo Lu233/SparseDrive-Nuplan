@@ -10,6 +10,14 @@ import numpy as np
 from pyquaternion import Quaternion
 from shapely.geometry import MultiPoint, box
 
+### visualization
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.transforms import Affine2D
+import shutil
+from data_utils import plotBirdsview
+### visualization end
+
 import mmcv
 
 from nuscenes.nuscenes import NuScenes
@@ -242,7 +250,7 @@ def _fill_trainval_infos(nusc,
             'ego2global_translation': pose_record['translation'],
             'ego2global_rotation': pose_record['rotation'],
             'timestamp': sample['timestamp'],
-            'map_location': map_location,
+            'map_location': map_location,  
         }
 
         l2e_r = info['lidar2ego_rotation']
@@ -270,6 +278,8 @@ def _fill_trainval_infos(nusc,
         map_geoms = nusc_map_extractor.get_map_geom(map_location, translation, rotation)
         map_annos = geom2anno(map_geoms)
         info['map_annos'] = map_annos
+        
+        # ego_heading_angle = Quaternion(e2g_r).yaw_pitch_roll[0]
 
         # obtain 6 image's information per frame
         camera_types = [
@@ -331,7 +341,8 @@ def _fill_trainval_infos(nusc,
             # we need to convert box size to
             # the format of our lidar coordinate system
             # which is x_size, y_size, z_size (corresponding to l, w, h)
-            gt_boxes = np.concatenate([locs, dims[:, [1, 0, 2]], rots], axis=1)
+            dims_processed = dims[:, [1, 0, 2]]
+            gt_boxes = np.concatenate([locs, dims_processed, rots], axis=1)
             assert len(gt_boxes) == len(
                 annotations), f'{len(gt_boxes)}, {len(annotations)}'
             
@@ -413,6 +424,8 @@ def _fill_trainval_infos(nusc,
             train_nusc_infos.append(info)
         else:
             val_nusc_infos.append(info)
+            
+        plotBirdsview(info, 2.5, 1.0, savefolder="savefig_nuscenes/", dataset="nuscenes")
 
     return train_nusc_infos, val_nusc_infos
 
@@ -429,10 +442,14 @@ def get_ego_status(nusc, nusc_can_bus, sample):
         pose_data = pose_msgs[pose_index]
         steer_index = locate_message(steer_uts, ref_utime)
         steer_data = steer_msgs[steer_index]
-        ego_status.extend(pose_data["accel"]) # acceleration in ego vehicle frame, m/s/s
-        ego_status.extend(pose_data["rotation_rate"]) # angular velocity in ego vehicle frame, rad/s
-        ego_status.extend(pose_data["vel"]) # velocity in ego vehicle frame, m/s
-        ego_status.append(steer_data["value"]) # steering angle, positive: left turn, negative: right turn
+        accel = pose_data["accel"]
+        rotation_rate = pose_data["rotation_rate"] 
+        vel = pose_data["vel"]
+        steer = steer_data["value"]
+        ego_status.extend(accel) # acceleration in ego vehicle frame, m/s/s
+        ego_status.extend(rotation_rate) # angular velocity in ego vehicle frame, rad/s
+        ego_status.extend(vel) # velocity in ego vehicle frame, m/s
+        ego_status.append(steer) # steering angle, positive: left turn, negative: right turn
     except:
         ego_status = [0] * 10
     

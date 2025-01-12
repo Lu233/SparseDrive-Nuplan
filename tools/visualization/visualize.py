@@ -23,9 +23,8 @@ plot_choices = dict(
     planning = True,
 )
 START = 0
-END = 81
+END = 30 # if negative value, then visualize the whole test dataset
 INTERVAL = 1
-
 
 class Visualizer:
     def __init__(
@@ -98,8 +97,11 @@ def parse_args():
 def main():
     args = parse_args()
     visualizer = Visualizer(args, plot_choices)
-
-    for idx in tqdm(range(START, END, INTERVAL)):
+    if END < 0:
+        range_end = len(visualizer.dataset.data_infos)
+    else:
+        range_end = END
+    for idx in tqdm(range(START, range_end, INTERVAL)):
         if idx > len(visualizer.results):
             break
         visualizer.add_vis(idx)

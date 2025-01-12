@@ -1,8 +1,8 @@
 # Quick Start
 
-### Set up a new virtual environment
+### Set up a new virtual environment, python 3.9 is used in oder to be compatible with nuplan
 ```bash
-conda create -n sparsedrive python=3.8 -y
+conda create -n sparsedrive python=3.9 -y
 conda activate sparsedrive
 ```
 
@@ -10,9 +10,10 @@ conda activate sparsedrive
 ```bash
 sparsedrive_path="path/to/sparsedrive"
 cd ${sparsedrive_path}
-pip3 install --upgrade pip
-pip3 install torch==1.13.0+cu116 torchvision==0.14.0+cu116 torchaudio==0.13.0 --extra-index-url https://download.pytorch.org/whl/cu116
-pip3 install -r requirement.txt
+pip install --upgrade pip
+pip install torch==1.13.0+cu116 torchvision==0.14.0+cu116 torchaudio==0.13.0 --extra-index-url https://download.pytorch.org/whl/cu116
+pip install -r requirement.txt
+pip install mmcv-full==1.7.1 -f https://download.openmmlab.com/mmcv/dist/cu116/torch1.13/index.html
 ```
 
 ### Compile the deformable_aggregation CUDA op
