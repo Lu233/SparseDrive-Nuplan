@@ -1,22 +1,23 @@
-# Mitigation of SparseDrive from nuscenes to nuplan
+# Migration of SparseDrive from nuscenes to nuplan
 
 ## Introduction
-This is a fork of the official [SparseDrive](https://github.com/swc-17/SparseDrive) repository. Major target of this fork is to mitigate the SparseDrive model to nuplan dataset. SparseDrive is a Sparse-Centric paradigm for end-to-end autonomous driving. It is trained and validated with the nuscenes dataset. Since 2022 the nuplan dataset has been released as the world's first large-scale planning benchmark for autonomous driving. It provides both open and closed loop resimulation to enable validation on planners. It would be interesting to see how the SparseDrive behaves in the nuplan dataset. 
+This is a fork of the official [SparseDrive](https://github.com/swc-17/SparseDrive) repository. The primary goal of this fork is to migrate the SparseDrive model to the NuPlan dataset. SparseDrive is a Sparse-Centric paradigm for end-to-end autonomous driving, originally trained and validated on the NuScenes dataset.
+Since 2022, the NuPlan dataset has been available as the world's first large-scale planning benchmark for autonomous driving. It provides both open-loop and closed-loop resimulation capabilities, enabling comprehensive validation of planners. This project aims to explore how SparseDrive performs with the NuPlan dataset.
 
 
 ## Works have been done so far
-- A nuplan_converter is created for converting the nuplan dataset into the same format of pkl file as in the original [SparseDrive](https://github.com/swc-17/SparseDrive). An internal Bird's view visualization is implemented to verify whether the converted data format is correct.
+- Developed a nuplan_converter to convert the NuPlan dataset into the same PKL file format used by the original [SparseDrive](https://github.com/swc-17/SparseDrive). A built-in bird's-eye-view visualization tool was implemented to verify the correctness of the converted data format.
 - Both test and visualization are slightly adapted so that it works with the nuplan converted pkl.
-- As I don't have a powerful GPU that is compatible with flashattention in my local machine, I have used a cloud remote with Nvidia 4090 for training and inference, while data conversion and visualization is remained in local machine. For this purpose I developed change_info_cam_path.py to adapt the image path in pkl files between remote and local. Benefit of this is: Data conversion (especially with full dataset) does not require a powerful GPU but could take long time, this could save some money. In addition one don't need to download the whole dataset at remote, but only the images.
-- Scripts files are created to running steps including data preparation, testing, visualization easily both on local and remote.
-- So far only tested with the nuplan mini dataset
+- As my local machine lacks a powerful GPU compatible with FlashAttention, I utilized a cloud environment with an NVIDIA 4090 for training and inference. Data conversion and visualization tasks were kept on the local machine. To facilitate this, I developed the change_info_cam_path.py script to adapt image paths in PKL files between local and remote environments. Benefits: Data conversion (especially for the full dataset) doesn’t require a powerful GPU, saving costs.
+- Created script files to streamline steps such as data preparation, testing, and visualization on both local and remote environments.
+- Tested so far using the NuPlan mini dataset.
 
 ## Intermediate result
 ### inference nuplan mini dataset
-model: use the one released by SparseDrive: [ckpt](https://github.com/swc-17/SparseDrive/releases/download/v1.0/sparsedrive_stage2.pth) 
+Model: SparseDrive pre-trained model released by the official repository: [ckpt](https://github.com/swc-17/SparseDrive/releases/download/v1.0/sparsedrive_stage2.pth) 
 ![Nuplan dataset inference](docs/intermediate_result.gif)
 
-### Birdsview plot comparsion between nuscenes and nuplan after data conversion
+### Bird's-Eye View Plot Comparison: NuScenes vs. NuPlan After Data Conversion
 nuscenes example
 ![nuscenes example](docs/nuscenes_birdsview_example.png)
 
@@ -24,11 +25,12 @@ nuplan example
 ![nuplan example](docs/nuplan_birdsview_example.png)
 
 ## Conclusion
-The inference has showed that the detection and prediction has generally worked however its performance is still poor. This could be related to: 
-- the actual camera mounting position and intrinsic in nuplan vehicles are not fully same as in nuscenes vehicles. these datas are unfortunately not given in nuplan dataset. Therefore the datas from nuscenes are used instead. 
+The inference results indicate that detection and prediction generally work; however, the performance remains suboptimal. This could be attributed to:
+- Differences in the actual camera mounting positions and intrinsics between NuPlan and NuScenes vehicles. Unfortunately, the NuPlan dataset does not provide detailed camera specifications, so the data from NuScenes was used as a substitute.
 
 ## next step
-- fine-tuning of the already released [ckpt](https://github.com/swc-17/SparseDrive/releases/download/v1.0/sparsedrive_stage2.pth) with nuplan dataset may improve the performance.
+- Fine-tune the pre-trained SparseDrive model using the NuPlan dataset to improve performance.
+- Integrate NuPlan inference into NuPlan’s closed-loop resimulation.
 
 ## Quick Start
 The quick start is slightly different compare to the orignal [Quick Start](docs/quick_start.md). But it is compatible with all the original SparseDrive functions.
