@@ -23,7 +23,7 @@ nuscenes example
 nuplan example
 ![nuplan example](docs/nuplan_birdsview_example.png)
 
-## Conclusion and 
+## Conclusion
 The inference has showed that the detection and prediction has generally worked however its performance is still poor. This could be related to: 
 - the actual camera mounting position and intrinsic in nuplan vehicles are not fully same as in nuscenes vehicles. these datas are unfortunately not given in nuplan dataset. Therefore the datas from nuscenes are used instead. 
 
